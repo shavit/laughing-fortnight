@@ -18,10 +18,10 @@ func main(){
 
   switch os.Args[1] {
   case SERVER:
-    startServer()
+    laughing_fortnight.StartServer()
     break
   case CLIENT:
-    startClient()
+    laughing_fortnight.StartClient()
     break
   default:
     printHelp()
@@ -37,17 +37,4 @@ func printHelp(){
       server  - Start a TCP server on 127.0.0.1:8888
       client  - Connect to a TCP server on 127.0.0.1:8888
 `)
-}
-
-func startServer(){
-  var err error
-  var srv = laughing_fortnight.NewServer()
-  println(srv)
-  if err = srv.Start(); err != nil {
-    panic(err)
-  }
-}
-
-func startClient(){
-
 }
