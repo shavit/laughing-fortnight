@@ -29,6 +29,13 @@ The server will hold a list of the other nodes in the network. Each node will tr
 
 A new node connection will make a request for all the available nodes in the network.
 
+To run as a node:
+```
+`./cmd -p PORT server`
+```
+
+The node will ignore the `port` and `host` arguments if there is no master.
+
 ### Reconnect as a master
 When the server dies, the oldest node or the last node, will take the master port and restart the connection.
 
