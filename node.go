@@ -1,14 +1,16 @@
 package laughing_fortnight
 
 import (
+  "context"
   "errors"
   "fmt"
   "io"
   "log"
   "net"
-  "sort"
   "sync"
-  "time"
+
+  etcd_client "go.etcd.io/etcd/clientv3"
+  etcd_concurrency "go.etcd.io/etcd/clientv3/concurrency"
 )
 
 type NodeStatus byte
@@ -19,6 +21,7 @@ const (
 	CANDIDATE
   MASTER_PORT = 8000
   MASTER_ADDRESS = "127.0.0.1:8000"
+  ELECTION_KEY = "leader_0"
 )
 
 // Node represents a server in a cluster.
@@ -27,14 +30,20 @@ type Node interface {
   // Start starts the TCP server
   Start() (err error)
 
-  // register sends the node address to the master
+  // register sends the node address to etcd
   register() (err error)
+
+  // listNodes list and prints out all the registered nodes on etcd
+  listNodes() (err error)
+
+  // campaign start an election for a leader
+  campaign() (err error)
 
   // handleMessage handle incoming messages
   handleMessage(conn net.Conn, message []byte) (err error)
 
   // findNewMaster lookup for a new master server
-  findNewMaster() (err error)
+  //findNewMaster() (err error)
 
   // Close closes the TCP connection
   Close() (err error)
@@ -44,18 +53,22 @@ type Node interface {
 type node struct {
   addr string
   conn net.Conn
-  id int64
+  etcdCtl *etcd_client.Client
+  etcdEndpoint string
+  id uint64
   ln net.Listener
   status NodeStatus
   masterAddr string
   peers map[string]net.Conn
   rNode Node
+  done chan struct{}
   *sync.RWMutex
 }
 
-func NewNode(status NodeStatus) Node {
+func NewNode(status NodeStatus, endpoint string) Node {
   var n *node = &node{
-    id: time.Now().Unix(),
+    done: make(chan struct{}, 1),
+    etcdEndpoint: endpoint,
     status: status,
     peers: make(map[string]net.Conn, 0),
     RWMutex: new(sync.RWMutex),
@@ -82,9 +95,9 @@ func (n *node) Start() (err error) {
       return errors.New("Error listening to " + n.addr)
     }
 
-    log.Println("Node connected on", n.addr, n.status)
     n.ln, err = net.Listen("tcp", n.addr)
     if err == nil {
+      log.Println("Node connected on", n.addr, n.status)
       break
     }
 
@@ -92,9 +105,7 @@ func (n *node) Start() (err error) {
     n.addr = fmt.Sprintf("127.0.0.1:%d", port)
   }
 
-  if n.status != MASTER {
-    go n.register()
-  }
+  go n.register()
 
   // Accept connections from other nodes
   for {
@@ -111,40 +122,84 @@ func (n *node) Start() (err error) {
   return err
 }
 
-// register sends the node address to the master
+// register sends the node address to etcd
 func (n *node) register() (err error) {
-  if n.masterAddr == "" {
-    n.masterAddr = MASTER_ADDRESS
-  }
-  n.conn, err = net.Dial("tcp", n.masterAddr)
+  var config etcd_client.Config = etcd_client.Config{Endpoints: []string{n.etcdEndpoint}}
+  n.etcdCtl, err = etcd_client.New(config)
   if err != nil {
-    log.Println(err)
-    return n.findNewMaster()
+    return
   }
+  defer n.etcdCtl.Close()
 
-  err = SendMessage(n.conn, &nodeMessage{
-    Event: "GET_NODES",
-    Body: []byte(n.addr),
-  })
-  if err != nil {
-    return err
-  }
-
-  // Listen to messages
+  go n.listNodes()
   for {
-    buf := make([]byte, 64000)
-    _, err = n.conn.Read(buf)
-    if err != nil {
-      log.Println("Connection closed by the server.")
-      return n.findNewMaster()
+    if err = n.campaign(); err != nil {
+      return err
     }
-
-    n.handleMessage(n.conn, buf)
-
-    buf = nil
   }
 
   return err
+}
+
+// listNodes list and prints out all the registered nodes on etcd
+func (n *node) listNodes() (err error) {
+  session, err := etcd_concurrency.NewSession(n.etcdCtl)
+  if err != nil {
+    return
+  }
+  defer session.Close()
+
+  election := etcd_concurrency.NewElection(session, ELECTION_KEY)
+  ctx, cancel := context.WithCancel(context.TODO())
+  defer cancel()
+
+  for resp := range election.Observe(ctx) {
+    leaderAddr := string(resp.Kvs[0].Value)
+    if n.addr == leaderAddr {
+      log.Println("[etcd] [self] Node", leaderAddr)
+    } else {
+      log.Println("[etcd] Node", leaderAddr)
+    }
+
+  }
+
+  return err
+}
+
+// campaign start an election for a leader
+func (n *node) campaign() (err error) {
+  session, err := etcd_concurrency.NewSession(n.etcdCtl)
+  if err != nil {
+    return err
+  }
+  defer session.Close()
+  n.id = uint64(session.Lease())
+
+  election := etcd_concurrency.NewElection(session, ELECTION_KEY)
+  ctx, cancel := context.WithCancel(context.TODO())
+  defer cancel()
+
+  if err := election.Campaign(ctx, n.addr); err != nil {
+    return err
+  }
+
+  resp, err := n.etcdCtl.Get(ctx, election.Key())
+  if err != nil {
+    return err
+  }
+  leaderAddr := string(resp.Kvs[0].Value)
+  log.Println("[etcd] New leader", leaderAddr, "Restarting")
+  if leaderAddr == n.addr {
+    n.status = MASTER
+    return n.Start()
+  }
+
+  select {
+  case <-session.Done():
+    return errors.New("Election interruped")
+  }
+
+  return election.Resign(context.TODO())
 }
 
 func (n *node) addNode(conn net.Conn) {
@@ -195,43 +250,6 @@ func (n *node) removeNode(conn net.Conn) {
   n.Unlock()
 }
 
-// findNewMaster lookup for a new master server
-func (n *node) findNewMaster() (err error) {
-  if n.masterAddr != "" {
-    delete(n.peers, n.masterAddr)
-  }
-
-  log.Println("FindNewMaster", len(n.peers))
-  if len(n.peers) <= 1 {
-    // Restart
-    n.status = MASTER
-    if err = n.Close(); err != nil {
-      return err
-    }
-    log.Println("Restarting as a master node", len(n.peers))
-    return n.Start()
-  }
-
-  // Sort the address and vote for the first node
-  var addresses []string = make([]string, len(n.peers))
-  for item, _ := range n.peers {
-    addresses = append(addresses, item)
-  }
-  sort.Strings(addresses)
-  n.masterAddr = addresses[0]
-  if err = n.Close(); err != nil {
-    return err
-  }
-  if n.masterAddr == n.addr {
-    n.status = MASTER
-    log.Println("Restarting as a master node", len(n.peers))
-  } else {
-    log.Println("Restarting as a slave node", len(n.peers))
-  }
-
-  return n.Start()
-}
-
 // handleMessage handle incoming messages
 func (n *node) handleMessage(conn net.Conn, message []byte) (err error) {
   msg, err := ParseMessage(message)
@@ -272,6 +290,7 @@ func (n *node) Close() (err error) {
     err = n.ln.Close()
   }
   n.ln = nil
+  n.done<- struct{}{}
 
   return err
 }

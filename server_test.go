@@ -7,7 +7,7 @@ import (
 
 func TestServerStart(t *testing.T){
   var err error
-  var srv Server = NewServer("127.0.0.1", 8000)
+  var srv Server = NewServer("127.0.0.1", 8000, "127.0.0.1:2379")
 
   if srv == nil {
     t.Error("Error creating a server")

@@ -56,16 +56,16 @@ type edge struct {
 }
 
 // StartServer starts a server
-func StartServer(ip string, port uint16){
+func StartServer(ip string, port uint16, endpoint string){
   var err error
-  var srv = NewServer(ip, port)
+  var srv = NewServer(ip, port, endpoint)
   if err = srv.Start(); err != nil {
     log.Fatal(err)
   }
 }
 
 // NewServer initialize a new empty server
-func NewServer(ip string, port uint16) (s Server) {
+func NewServer(ip string, port uint16, endpoint string) (s Server) {
   var nodeStatus NodeStatus
 
   // The master always starts on port 8888, but if this port is not
@@ -79,7 +79,7 @@ func NewServer(ip string, port uint16) (s Server) {
   return &server{
     conns: make([]*edge, 0),
     ip: []byte(ip),
-    node_: NewNode(nodeStatus),
+    node_: NewNode(nodeStatus, endpoint),
     port: port,
     RWMutex: new(sync.RWMutex),
   }

@@ -11,7 +11,7 @@ TCP server written in Go.
 ### Server
 The server echos back messages. To start the server:
 ```
-`./cmd server`
+./cmd server
 ```
 
 This will start a TCP server that will accept connections on 2 ports, from both CLI clients and other nodes.
@@ -31,7 +31,7 @@ A new node connection will make a request for all the available nodes in the net
 
 To run as a node:
 ```
-`./cmd -p PORT server`
+./cmd -p PORT server
 ```
 
 The node will ignore the `port` and `host` arguments if there is no master.
@@ -43,3 +43,21 @@ When the slave becomes a master it will only establish a TCP connection to the o
 
 ### Election
 In this example the nodes do not communicate with each other, and there is no scoring system or health checks on each node.
+
+## etcd
+
+etcd is a reliable key value store that will be used here for the leader election.
+
+To install etcd, glone the project using git and run the following commands
+```
+$ git clone https://github.com/coreos/etcd.git $GOPATH/github.com/coreos/etcd
+$ cd $GOPATH/github.com/coreos/etcd
+$ go get ./...
+$ ./build
+$ export PATH=$PATH:$GOPATH/src/github.com/coreos/etcd/bin
+```
+
+Start etcd and pass an address to advertise
+```
+$ etcd --advertise-client-urls http://localhost:2379
+```

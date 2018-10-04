@@ -14,6 +14,7 @@ const (
 func main(){
   var fHost = flag.String("h", "127.0.0.1", "host address")
   var fPort = flag.Int("p", 8888, "port number")
+  var fEndpoint = flag.String("endpoint", "127.0.0.1:2379", "etcd client endpoint")
   flag.Parse()
 
   if len(os.Args) <= 1 {
@@ -23,7 +24,7 @@ func main(){
 
   switch os.Args[len(os.Args)-1] {
   case SERVER:
-    laughing_fortnight.StartServer(*fHost, uint16(*fPort))
+    laughing_fortnight.StartServer(*fHost, uint16(*fPort), *fEndpoint)
     break
   case CLIENT:
     laughing_fortnight.StartClient()
@@ -43,7 +44,8 @@ func printHelp(){
       client  - Connect to a TCP server on 127.0.0.1:8888
 
     Options:
-      -p      - port number, defaults to 8888
-      -h      - host address, defaults to 127.0.0.1
+      -p            - port number, defaults to 8888
+      -h            - host address, defaults to 127.0.0.1
+      -endpoint     - etcd endpoint, defaults to 127.0.0.1:2379
 `)
 }
