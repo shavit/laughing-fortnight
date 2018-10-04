@@ -27,7 +27,7 @@ func main(){
     laughing_fortnight.StartServer(*fHost, uint16(*fPort), *fEndpoint)
     break
   case CLIENT:
-    laughing_fortnight.StartClient()
+    laughing_fortnight.StartClient(12)
     break
   default:
     printHelp()

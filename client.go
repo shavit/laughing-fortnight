@@ -9,6 +9,7 @@ import (
   "os"
   "os/signal"
   "syscall"
+  "time"
 )
 
 type ChatClient interface {
@@ -56,19 +57,22 @@ func (client *chatClient) echoServer(done chan struct{}){
     buf = nil
   }
 
-  log.Println("Disconnecting.")
   done <- struct{}{}
 }
 
 
-func StartClient(){
+func StartClient(retry uint8){
   var err error
   var ch chan os.Signal = make(chan os.Signal)
   var client ChatClient = NewChatClient()
   var done chan struct{} = make(chan struct{})
 
   if err = client.Dial("tcp", "127.0.0.1:8888"); err != nil {
-    log.Fatal(err)
+    log.Println(err)
+    retryConnection(retry)
+    return
+  } else {
+    retry = 3
   }
   defer client.Close()
 
@@ -82,4 +86,15 @@ func StartClient(){
   go client.handleInput()
   go client.echoServer(done)
   <-done
+
+  // Try to reconnect to a new server
+  retryConnection(retry)
+}
+
+func retryConnection(retry uint8) {
+  if retry == 0 {
+    return
+  }
+  time.Sleep(time.Duration(int64(9/retry))  * time.Second)
+  StartClient(retry - 1)
 }

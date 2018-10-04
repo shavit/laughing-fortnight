@@ -7,7 +7,8 @@ import (
 
 func TestStartNode(t *testing.T){
   var err error
-  var node_ Node = NewNode(MASTER, "")
+  var node_ Node = NewNode("", "")
+  var errc chan error = make(chan error, 0)
 
   // Close after n time
   go func() {
@@ -17,14 +18,18 @@ func TestStartNode(t *testing.T){
     }
   }()
 
-  if err = node_.Start(); err != nil {
+  go func() {
+    node_.Start(errc)
+  }()
+
+  if err = <-errc; err != nil {
     t.Error(err)
   }
 }
 
 func TestCloseNode(t *testing.T){
   var err error
-  var node_ Node = NewNode(SLAVE, "")
+  var node_ Node = NewNode("", "")
 
   if err = node_.Close(); err != nil {
     t.Error(err)

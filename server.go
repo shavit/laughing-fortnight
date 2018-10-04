@@ -2,8 +2,8 @@ package laughing_fortnight
 
 import (
   "errors"
-  "io"
   "fmt"
+  "io"
   "log"
   "net"
   "os"
@@ -17,6 +17,9 @@ type Server interface {
   // Start starts the server to accept incoming connections, announce and
   //  publish messages.
   Start() error
+
+  // acceptClients opens a TCP socket for clients
+  acceptClients() (err error)
 
   // addClient appends a connection to the server
   addClient(conn net.Conn)
@@ -45,6 +48,7 @@ type server struct {
   node_ Node // Listen to other peers
   peers []Node
   port uint16
+  status NodeStatus
   *sync.RWMutex
 }
 
@@ -66,20 +70,11 @@ func StartServer(ip string, port uint16, endpoint string){
 
 // NewServer initialize a new empty server
 func NewServer(ip string, port uint16, endpoint string) (s Server) {
-  var nodeStatus NodeStatus
-
-  // The master always starts on port 8888, but if this port is not
-  //  available, there might be another master.
-  if port == 8888 {
-    nodeStatus = MASTER
-  } else {
-    nodeStatus = CANDIDATE
-  }
-
   return &server{
     conns: make([]*edge, 0),
+    done: make(chan error, 1),
     ip: []byte(ip),
-    node_: NewNode(nodeStatus, endpoint),
+    node_: NewNode(ip, endpoint),
     port: port,
     RWMutex: new(sync.RWMutex),
   }
@@ -88,34 +83,69 @@ func NewServer(ip string, port uint16, endpoint string) (s Server) {
 // Start starts the server to accept incoming connections, announce and
 //  publish messages.
 func (s *server) Start() (err error){
-  var ch chan os.Signal = make(chan os.Signal)
-  var conn net.Conn
-  var addr string = fmt.Sprintf("%s:%d", string(s.ip), s.port)
-
-  s.ln, err = net.Listen("tcp", addr)
-  if err != nil {
-    return errors.New("Error listening to " + addr)
-  }
-
   // Exit gracefully
-  go func() {
-    signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-    <-ch
-    s.Close(errors.New("Terminated by user"))
-  }()
-
-  // Listen to the exit signal
-  go func() {
-    // Block and wait for a signal to exit the program
-    s.Close(<-s.done) // It will wait for the channel before executing
-    log.Println("\n\nSending exit notificaiton to all clients\n")
-  }()
+  var ch chan os.Signal = make(chan os.Signal)
+  go signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 
   // Discover and accept connections from other nodes
-  go s.node_.Start()
+  go s.node_.Start(s.done)
 
   // Accept connections from clients
-  log.Println("Listening on", addr)
+  var acch chan error = make(chan error, 1)
+  go func() {
+    if err = s.acceptClients(); err != nil {
+      acch<- err
+    }
+  }()
+
+  for {
+    select {
+
+    // When the node wants to restart the server as the master
+    case err = <-s.done:
+      log.Println("Server restarted by node", err)
+      s.port = 8888
+      return s.Start()
+
+    // When the address is not available
+    case err = <-acch:
+      if s.port > 8800 && s.port < 10000 {
+        s.port += 1
+        time.Sleep(time.Duration(1 * time.Second))
+        return s.Start()
+      } else {
+        s.Close(err)
+        return err
+      }
+
+    // Shutdown the server
+    case <-ch:
+      s.Close(errors.New("Terminated by user"))
+      return err
+    }
+  }
+
+  return err
+}
+
+// acceptClients opens a TCP socket for clients
+func (s *server) acceptClients() (err error){
+  // The master always starts on port 8888, but if this port is not
+  //  available, there might be another master.
+  if s.port == 8888 {
+    s.status = LEADER
+  } else {
+    s.status = FOLLOWER
+  }
+
+  var conn net.Conn
+  var addr string = fmt.Sprintf("%s:%d", string(s.ip), s.port)
+  s.ln, err = net.Listen("tcp", addr)
+  if err != nil {
+    return errors.New("Error listening on" + addr)
+  }
+  log.Println("Server listens to clients on", addr, s.status.String())
+
   for {
     conn, err = s.ln.Accept()
     if err != nil {
@@ -125,8 +155,6 @@ func (s *server) Start() (err error){
 
     go s.addClient(conn)
   }
-
-  return err
 }
 
 // addClient appends a connection to the server
@@ -201,15 +229,16 @@ func (s *server) Close(err error) {
   log.Println("Closing the server.\n", err)
 
   // Announce closing to all the clients here
-  // ..
   s.broadcastMessage(&edge{}, []byte("\n\n*** SERVER IS SHUTTING DOWN ***\n"))
 
   if err = s.node_.Close(); err != nil {
     log.Fatal(err)
   }
   // Close the network connection
-  err = s.ln.Close()
-  log.Println("Closing the network connection.\n", err)
+  if s.ln != nil {
+    err = s.ln.Close()
+    log.Println("Closing the network connection.\n", err)
+  }
 
   // Exit the program
   os.Exit(0)

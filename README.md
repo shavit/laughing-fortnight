@@ -24,6 +24,9 @@ To start the client:
 $ ./cmd client
 ```
 
+In the event of election, the client will reconnect to the leader and will
+  continue to send and receive messagse.
+
 ## Nodes
 The server will hold a list of the other nodes in the network. Each node will try to connect first to the master node, in a known address.
 
@@ -64,12 +67,19 @@ $ etcd --advertise-client-urls http://localhost:2379
 
 ### Leader Election Example
 
-Start 3 servers, or any odd number for leader election:
-
+Start 3 servers, or any odd number for leader election. The server with the
+  `8888` port starts as a leader.
 ```
-1$ ./cmd server -p 9600 server
-2$ ./cmd server -p 9700 server
-3$ ./cmd server -p 9800 server
+1$ ./cmd -p 8888 server
+2$ ./cmd -p 9700 server
+3$ ./cmd -p 9800 server
+```
+
+The servers can start without a port assigned to them.
+```
+1$ ./cmd server
+2$ ./cmd server
+3$ ./cmd server
 ```
 
 These servers will connect to the etcd at `127.0.0.1:2379`, or the value
