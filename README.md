@@ -61,3 +61,18 @@ Start etcd and pass an address to advertise
 ```
 $ etcd --advertise-client-urls http://localhost:2379
 ```
+
+### Leader Election Example
+
+Start 3 servers, or any odd number for leader election:
+
+```
+1$ ./cmd server -p 9600 server
+2$ ./cmd server -p 9700 server
+3$ ./cmd server -p 9800 server
+```
+
+These servers will connect to the etcd at `127.0.0.1:2379`, or the value
+  that was passed to the `-endpoint` flag.
+
+When the election is complete the leader will restart and listen to port `8888`.
